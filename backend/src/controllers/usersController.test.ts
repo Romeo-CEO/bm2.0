@@ -19,19 +19,19 @@ const {
 }));
 
 vi.mock('../config/database', () => ({
-  getConnection: (...args: any[]) => getConnectionMock(...args),
+  getConnection: getConnectionMock,
 }));
 
 vi.mock('../services/auditService', () => ({
-  logAuditEvent: (...args: any[]) => logAuditEventMock(...args),
+  logAuditEvent: logAuditEventMock,
 }));
 
 vi.mock('../services/emailService', () => ({
-  sendTemporaryPasswordEmail: (...args: any[]) => sendTemporaryPasswordEmailMock(...args),
+  sendTemporaryPasswordEmail: sendTemporaryPasswordEmailMock,
 }));
 
 vi.mock('../utils/companySeats', () => ({
-  getSeatUsage: (...args: any[]) => getSeatUsageMock(...args),
+  getSeatUsage: getSeatUsageMock,
 }));
 
 vi.mock('../utils/passwordPolicy', () => ({
@@ -40,16 +40,17 @@ vi.mock('../utils/passwordPolicy', () => ({
 }));
 
 const createMockResponse = (): Response & { body?: any; statusCode?: number } => {
-  const res: Partial<Response & { body?: any; statusCode?: number }> = {};
-  res.statusCode = 200;
-  res.status = vi.fn(function (this: any, code: number) {
-    this.statusCode = code;
-    return this;
-  });
-  res.json = vi.fn(function (this: any, payload: any) {
-    this.body = payload;
-    return this;
-  });
+  const res: Partial<Response & { body?: any; statusCode?: number }> = {
+    statusCode: 200,
+  };
+  res.status = vi.fn((code: number) => {
+    res.statusCode = code;
+    return res as Response;
+  }) as any;
+  res.json = vi.fn((payload: any) => {
+    res.body = payload;
+    return res as Response;
+  }) as any;
   return res as Response & { body?: any; statusCode?: number };
 };
 

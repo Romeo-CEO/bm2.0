@@ -15,7 +15,7 @@ BEGIN
     created_at DATETIMEOFFSET NOT NULL DEFAULT GETUTCDATE(),
     updated_at DATETIMEOFFSET NOT NULL DEFAULT GETUTCDATE(),
     FOREIGN KEY (company_id) REFERENCES dbo.companies(id) ON DELETE CASCADE,
-    FOREIGN KEY (invited_by) REFERENCES dbo.users(id) ON DELETE SET NULL
+    FOREIGN KEY (invited_by) REFERENCES dbo.users(id) ON DELETE NO ACTION
   );
 
   CREATE UNIQUE INDEX IX_company_invitations_token_hash ON dbo.company_invitations(token_hash);
