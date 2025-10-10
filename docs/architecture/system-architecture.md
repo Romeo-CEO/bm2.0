@@ -442,22 +442,41 @@ Business Manager is a **multi-tenant B2B SaaS platform** that serves as a centra
 
 #### 4.2.1 Database-Level Isolation
 
-**Strategy:** Row-Level Filtering (RLS) via `company_id` foreign key
+**Strategy:** Shared SQL Server row-level security enforced through `SESSION_CONTEXT`.
 
-```
-users table:
-┌──────────┬─────────────┬────────────┬──────────────┐
-│ id       │ email       │ company_id │ role         │
-├──────────┼─────────────┼────────────┼──────────────┤
-│ user-1   │ alice@a.com │ company-A  │ user         │
-│ user-2   │ bob@a.com   │ company-A  │ user         │
-│ user-3   │ charlie@b   │ company-B  │ user         │
-└──────────┴─────────────┴────────────┴──────────────┘
-```
+- **Single Azure SQL database.** Biz Manager continues to use the `dbo` schema while every application (e.g. ABC Costing) owns a dedicated schema such as `abc`.
+- **Unified tenant identifier.** Application tables include `tenant_id UNIQUEIDENTIFIER NOT NULL` and reuse the Biz Manager `companies.id` value without additional mapping tables.
+- **Session context from SSO.** When a user launches an application, the backend sets `SESSION_CONTEXT('tenant_id', @companyId)` on the SQL connection; the optional flag `SESSION_CONTEXT('allow_cross_tenant') = '1'` enables platform-admin overrides.
 
-**All queries must include:**
+**Reusable predicate (`dbo.fn_tenant_rls_predicate`):**
 ```sql
-WHERE company_id = @userCompanyId
+CREATE FUNCTION dbo.fn_tenant_rls_predicate (@tenant_id UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN
+SELECT 1 AS fn_result
+FROM (
+    SELECT
+        TRY_CONVERT(UNIQUEIDENTIFIER, SESSION_CONTEXT(N'tenant_id')) AS tenant_context,
+        LOWER(CONVERT(NVARCHAR(10), SESSION_CONTEXT(N'allow_cross_tenant'))) AS admin_flag
+) AS ctx
+WHERE
+    (ctx.tenant_context IS NOT NULL AND @tenant_id = ctx.tenant_context)
+    OR (ctx.admin_flag IN (N'1', N'true', N'yes'));
+```
+
+**Security policy example (ABC Costing schema):**
+```sql
+ALTER SECURITY POLICY dbo.tenant_isolation_policy
+  ADD FILTER PREDICATE dbo.fn_tenant_rls_predicate(tenant_id) ON abc.costing_projects,
+  ADD BLOCK PREDICATE dbo.fn_tenant_rls_predicate(tenant_id) ON abc.costing_projects AFTER INSERT,
+  ADD BLOCK PREDICATE dbo.fn_tenant_rls_predicate(tenant_id) ON abc.costing_projects AFTER UPDATE;
+```
+
+**Connection bootstrap:**
+```sql
+EXEC sp_set_session_context @key = N'tenant_id', @value = @companyId;
 ```
 
 #### 4.2.2 Application-Level Isolation
@@ -571,6 +590,21 @@ if (requestedCompanyId !== req.user.companyId) {
     requestedCompany: requestedCompanyId
   });
 }
+```
+
+**5. SQL Server RLS Enforcement:**
+```sql
+-- Enforced for every application schema (see Section 4.2.1)
+ALTER SECURITY POLICY dbo.tenant_isolation_policy WITH (STATE = ON);
+```
+
+**6. Session Context Middleware (application backends):**
+```typescript
+// Express middleware inside each application service
+await db.query(
+  "EXEC sp_set_session_context @key=N'tenant_id', @value=@companyId",
+  [companyId]
+);
 ```
 
 ### 4.5 Multi-Tenant Data Access Patterns
@@ -1196,14 +1230,15 @@ X-RateLimit-Reset: 1672531200
 
 Business Manager acts as the **central authentication hub** for multiple business applications. Users authenticate once on Business Manager, then seamlessly access other applications without re-authenticating.
 
-**SSO Flow:**
-```
-User → Business Manager (login) → Master Token
-  ↓
-Click "Use Application" → Domain Token Generated
-  ↓
-Application validates Domain Token → User authenticated in app
-```
+**SSO Flow (query-parameter bootstrap):**
+
+1. User signs in to Biz Manager and receives a platform JWT.
+2. Biz Manager requests/refreshes an SSO session via `POST /api/sso/authenticate` (response contains `sessionId`).
+3. Immediately before opening an app, Biz Manager requests a domain-scoped token via `POST /api/sso/validate/:domain` and opens `https://{app-domain}/sso?token={domainToken}`.
+4. The application backend calls `POST /api/sso/token/validate` with `{ token, domain }`, trusts the response, and sets `SESSION_CONTEXT('tenant_id', companyId)` for all SQL activity.
+5. Row-Level Security policies enforce tenant isolation inside the shared Azure SQL database.
+
+> Domain tokens are short-lived (1 hour), domain-bound, and always validated server-to-server—clients never trust them directly.
 
 ### 8.2 SSO Database Schema
 
@@ -1284,34 +1319,26 @@ CREATE TABLE sso_audit (
 ### 8.4 SSO Launch Flow
 
 ```
-┌─────────┐              ┌──────────────┐           ┌─────────────┐
-│ User    │              │  Business    │           │ Application │
-│ Browser │              │  Manager     │           │  Server     │
-└────┬────┘              └──────┬───────┘           └──────┬──────┘
-     │                          │                          │
-     │ Click "Use App"          │                          │
-     ├─────────────────────────>│                          │
-     │                          │                          │
-     │                          │ 1. Validate master token │
-     │                          │ 2. Generate domain token │
-     │                          │ 3. Create SSO session    │
-     │                          │                          │
-     │ Redirect with token      │                          │
-     │<─────────────────────────┤                          │
-     │                          │                          │
-     │ GET /sso?token=...       │                          │
-     ├──────────────────────────┼─────────────────────────>│
-     │                          │                          │
-     │                          │                          │ 1. Extract token
-     │                          │                          │ 2. Validate with
-     │                          │                          │    Business Manager
-     │                          │                          │ 3. Create app session
-     │                          │                          │ 4. Set session cookie
-     │                          │                          │
-     │ Application dashboard    │                          │
-     │<─────────────────────────┼──────────────────────────┤
-     │                          │                          │
+┌─────────┐      ┌────────────────────┐      ┌────────────────────┐      ┌──────────────┐
+│ Browser │      │ Biz Manager API    │      │ Application API    │      │ Azure SQL DB │
+└───┬─────┘      └─────────┬──────────┘      └─────────┬──────────┘      └──────┬───────┘
+    │ (1) POST /api/sso/authenticate (JWT)              │                         │
+    │───────────────────────────────>│                  │                         │
+    │<──────── sessionId ───────────│                  │                         │
+    │ (2) POST /api/sso/validate/:domain (sessionId)    │                         │
+    │───────────────────────────────>│                  │                         │
+    │<──────── domain token ────────│                  │                         │
+    │ (3) GET https://app/sso?token=…                  │                         │
+    │──────────────────────────────────────────────────>│                         │
+    │                                                 │ (4) POST /api/sso/token/validate
+    │                                                 │───────────────────────────────>│
+    │                                                 │<──────── user + companyId ───│
+    │                                                 │ (5) EXEC sp_set_session_context
+    │                                                 │────────────────────────────────>│
+    │                                                 │<──────── tenant-scoped data ─│
 ```
+
+Biz Manager caches the `sessionId` in local storage (`bizmanager.sso.session`) to avoid redundant `/authenticate` calls while honoring short-lived domain tokens.
 
 ### 8.5 SSO Security
 
@@ -1326,6 +1353,7 @@ CREATE TABLE sso_audit (
 - Last activity timestamp
 - Automatic cleanup of expired sessions
 - Revocation on logout
+- Application backends must set `SESSION_CONTEXT('tenant_id', companyId)` prior to executing SQL so that RLS applies automatically
 
 **Audit Trail:**
 - All SSO events logged
@@ -1343,6 +1371,7 @@ The Application Marketplace is a catalog of business applications that users can
 - Runs on its own subdomain (e.g., `inventory.businessmanager.com`)
 - Requires specific subscription tiers
 - Integrates with Business Manager via SSO
+- Example: **ABC Costing Pro** lives in the `abc` schema, includes `tenant_id` on every table, and enforces access exclusively through the shared RLS predicate.
 
 ### 9.2 Application Lifecycle
 
