@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@/types';
-import { apiLogin, apiRegister, apiMe } from '@/lib/api';
+import { apiLogin, apiRegister, apiMe, apiLogout } from '@/lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -9,7 +9,7 @@ interface AuthContextType {
   isBootstrapping: boolean; // initial token validation
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (userData: Partial<User>, password: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -160,10 +160,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
 
-  const logout = () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    setUser(null);
+  const logout = async (): Promise<void> => {
+    try {
+      await apiLogout();
+    } catch (error) {
+      console.warn('[AuthContext] Logout API call failed, continuing with local cleanup.', error);
+    } finally {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      setUser(null);
+    }
   };
 
   // Consider the presence of a token as authenticated; user profile will be fetched via /me
