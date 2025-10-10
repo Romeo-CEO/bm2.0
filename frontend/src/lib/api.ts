@@ -21,46 +21,41 @@ export interface PayFastCheckoutResponse {
 }
 
 const buildApiBase = (): string => {
-  const ensureTrailingSlash = (s: string) => s.replace(/\/?$/, "/");
-  const normalizePublic = (base: string) => {
-    // If user passed the domain only, append /api/public/
-    if (!/\/[aA][pP][iI]\/[pP][uU][bB][lL][iI][cC]\/?$/.test(base)) {
-      base = base.replace(/\/?$/, "/api/public/");
-    }
-    return ensureTrailingSlash(base);
-  };
+  const ensureTrailingSlash = (value: string) => (value.endsWith('/') ? value : `${value}/`);
+  const sanitize = (value: string) => ensureTrailingSlash(value.replace(/\s+/g, '').replace(/\/*$/, '/'));
 
-  // 1) .env override (build-time)
   const fromEnv = (import.meta as any).env?.VITE_API_BASE as string | undefined;
-  if (fromEnv) return ensureTrailingSlash(fromEnv);
+  if (fromEnv) {
+    return sanitize(fromEnv);
+  }
 
-  // 2) URL query override (?apiBase= or ?api=) — saved to localStorage for convenience
   try {
     const qs = new URLSearchParams(window.location.search);
     const fromQuery = qs.get('apiBase') || qs.get('api');
     if (fromQuery) {
-      const normalized = normalizePublic(fromQuery);
+      const normalized = sanitize(fromQuery);
       localStorage.setItem('API_BASE_OVERRIDE', normalized);
       return normalized;
     }
   } catch {}
 
-  // 3) localStorage override (persisted from a previous session)
   try {
     const fromStorage = localStorage.getItem('API_BASE_OVERRIDE');
-    if (fromStorage) return ensureTrailingSlash(fromStorage);
+    if (fromStorage) {
+      return sanitize(fromStorage);
+    }
   } catch {}
 
-  // 4) Vercel production convenience default (can still be overridden via query/localStorage)
-  if (window.location.hostname.includes('vercel.app')) {
-    // cPanel backend deployment - correct URL without www
-    return 'https://premwebs.com/api/public/';
+  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+    return 'https://premwebs.com/api/';
   }
 
-  // 5) Fallback: same-origin relative path for local dev
-  const baseUrl = (import.meta as any).env?.BASE_URL || "/";
-  const absolute = new URL(".", window.location.origin + baseUrl).toString();
-  return new URL("api/public/", absolute).toString();
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin.replace(/\/$/, '');
+    return `${origin}/api/`;
+  }
+
+  return '/api/';
 };
 
 export const API_BASE = buildApiBase();
@@ -71,10 +66,9 @@ console.log('API_BASE =', API_BASE);
 // window.__clearApiBaseOverride = () => { localStorage.removeItem('API_BASE_OVERRIDE'); location.reload(); };
 //
 // SSL Certificate Issue Solutions:
-// window.__setApiBase('http://premwebs.com/api/public/');  // HTTP (no SSL)
-// window.__setApiBase('https://www.premwebs.com/api/public/');  // Try www subdomain
-// window.__setApiBase('https://premwebs.com:2083/api/public/');  // Try cPanel port
-// window.__setApiBase('https://cpanel.premwebs.com/api/public/');  // Try cpanel subdomain
+// window.__setApiBase('http://premwebs.com/api/');
+// window.__setApiBase('https://www.premwebs.com/api/');
+// window.__setApiBase('https://premwebs.com:2083/api/');
 
 
 const jsonHeaders: HeadersInit = { "Content-Type": "application/json" };
@@ -253,6 +247,18 @@ export async function apiRegister(params: {
   const user = mapUserFromApi(data.user);
   localStorage.setItem('token', data.token);
   return { success: true, data: user };
+}
+
+export async function apiLogout(): Promise<void> {
+  try {
+    await fetch(`${API_BASE}auth/logout`, {
+      method: 'POST',
+      headers: authHeaders({ json: true }),
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    console.warn('[apiLogout] request failed', error);
+  }
 }
 
 // Enhanced User Management with Pagination
@@ -554,7 +560,7 @@ export interface TemplateItem {
 }
 
 export async function apiGetTemplates(): Promise<ApiResult<TemplateItem[]>> {
-  const url = `/api/platform/templates`;
+  const url = `${API_BASE}templates`;
   const res = await fetch(url, { method: 'GET', headers: authHeaders() });
   const data = await res.json().catch(() => []);
   if (!res.ok) return { success: false, error: (data as any)?.error || res.statusText };
@@ -562,20 +568,20 @@ export async function apiGetTemplates(): Promise<ApiResult<TemplateItem[]>> {
 }
 
 export async function apiCreateTemplate(payload: Partial<TemplateItem>): Promise<ApiResult<string>> {
-  const res = await fetch(`/api/platform/templates`, { method: 'POST', headers: authHeaders({ json: true }), body: JSON.stringify(payload) });
+  const res = await fetch(`${API_BASE}templates`, { method: 'POST', headers: authHeaders({ json: true }), body: JSON.stringify(payload) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { success: false, error: (data as any)?.error || res.statusText };
   return { success: true, data: (data as any).id };
 }
 
 export async function apiUpdateTemplate(id: string, payload: Partial<TemplateItem>): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/platform/templates/${encodeURIComponent(id)}`, { method: 'PUT', headers: authHeaders({ json: true }), body: JSON.stringify(payload) });
+  const res = await fetch(`${API_BASE}templates/${encodeURIComponent(id)}`, { method: 'PUT', headers: authHeaders({ json: true }), body: JSON.stringify(payload) });
   if (!res.ok) return { success: false, error: await res.text() } as any;
   return { success: true };
 }
 
 export async function apiDeleteTemplate(id: string): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/platform/templates/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
+  const res = await fetch(`${API_BASE}templates/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) return { success: false, error: await res.text() } as any;
   return { success: true };
 }
@@ -614,7 +620,7 @@ export async function apiFilesConfirm(input: { blobName: string; fileName: strin
 
 export async function apiDownloadTemplate(id: string): Promise<ApiResult<Blob>> {
   // This path is not used with the new platform template flow; keeping for compatibility
-  const res = await fetch(`/api/platform/templates/${encodeURIComponent(id)}`, { method: 'GET', headers: authHeaders() });
+  const res = await fetch(`${API_BASE}templates/${encodeURIComponent(id)}`, { method: 'GET', headers: authHeaders() });
   if (!res.ok) return { success: false, error: res.statusText };
   const data = await res.json().catch(() => null);
   if (!data?.downloadUrl) return { success: false, error: 'No download URL' };
@@ -796,7 +802,7 @@ export async function apiUpdateCompanyProfile(profile: any, companyId?: string):
 
 // Company User Management
 export async function apiGetCompanyUsers(companyId?: string): Promise<ApiResult<any[]>> {
-  const url = companyId ? `${API_BASE}company/users/${companyId}` : `${API_BASE}company/users`;
+  const url = companyId ? `${API_BASE}companies/${companyId}/users` : `${API_BASE}company/users`;
   const res = await fetch(url, { method: 'GET', headers: authHeaders() });
   const data = await res.json().catch(() => []);
   if (!res.ok) return { success: false, error: data?.error || res.statusText };
@@ -809,7 +815,7 @@ export async function apiAddCompanyUser(userData: {
   lastName: string;
   sendInvite?: boolean;
 }, companyId?: string): Promise<ApiResult<{ userId: string; tempPassword: string }>> {
-  const url = companyId ? `${API_BASE}company/users/${companyId}` : `${API_BASE}company/users`;
+  const url = companyId ? `${API_BASE}companies/${companyId}/users` : `${API_BASE}company/users`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { ...jsonHeaders, ...authHeaders() },

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getConnection } from '../config/database';
+import { sendError, sendPaginated, sendSuccess } from '../utils/responses';
 
 export class UsersController {
   /**
@@ -7,21 +8,33 @@ export class UsersController {
    */
   async getUsers(req: Request, res: Response): Promise<void> {
     try {
-      const db = await getConnection();
-      const result = await db.query(`
-        SELECT id, email, first_name, last_name, role, company_id, subscription_tier, is_active, created_at
-        FROM users 
-        ORDER BY created_at DESC
-      `);
+      const { page = '1', pageSize = '25' } = req.query as Record<string, string>;
+      const pageNumber = Math.max(parseInt(String(page), 10) || 1, 1);
+      const pageSizeNumber = Math.max(Math.min(parseInt(String(pageSize), 10) || 25, 100), 1);
+      const offset = (pageNumber - 1) * pageSizeNumber;
 
-      res.json({
-        success: true,
-        users: result.rows
+      const db = await getConnection();
+      const countResult = await db.query('SELECT COUNT(*) AS total FROM users');
+      const total = Number(countResult.rows?.[0]?.total ?? 0);
+      const result = await db.query(
+        `SELECT id, email, first_name, last_name, role, company_id, subscription_tier, is_active, created_at
+         FROM users
+         ORDER BY created_at DESC
+         OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`,
+        [offset, pageSizeNumber]
+      );
+
+      sendPaginated(res, {
+        items: result.rows,
+        page: pageNumber,
+        pageSize: pageSizeNumber,
+        total,
+        totalPages: Math.max(Math.ceil(total / pageSizeNumber), 1),
       });
 
     } catch (error) {
       console.error('Get users error:', error);
-      res.status(500).json({ error: 'Failed to get users' });
+      sendError(res, 500, 'USERS_FETCH_FAILED', 'Failed to get users');
     }
   }
 
@@ -33,10 +46,7 @@ export class UsersController {
       const { id } = req.params;
       const { firstName, lastName, role, subscriptionTier, isActive } = req.body;
 
-      if (!id) {
-        res.status(400).json({ error: 'User ID required' });
-        return;
-      }
+      if (!id) { sendError(res, 400, 'USER_ID_REQUIRED', 'User ID required'); return; }
 
       const db = await getConnection();
       
@@ -65,10 +75,7 @@ export class UsersController {
         values.push(isActive ? 1 : 0);
       }
 
-      if (updates.length === 0) {
-        res.status(400).json({ error: 'No fields to update' });
-        return;
-      }
+      if (updates.length === 0) { sendError(res, 400, 'NO_FIELDS', 'No fields to update'); return; }
 
       values.push(id);
 
@@ -78,15 +85,9 @@ export class UsersController {
         WHERE id = ?
       `, values);
 
-      if (result.rowCount === 0) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
+      if (result.rowCount === 0) { sendError(res, 404, 'USER_NOT_FOUND', 'User not found'); return; }
 
-      res.json({
-        success: true,
-        message: 'User updated successfully'
-      });
+      sendSuccess(res, { message: 'User updated successfully' });
 
     } catch (error) {
       console.error('Update user error:', error);
@@ -101,23 +102,14 @@ export class UsersController {
     try {
       const { id } = req.params;
 
-      if (!id) {
-        res.status(400).json({ error: 'User ID required' });
-        return;
-      }
+      if (!id) { sendError(res, 400, 'USER_ID_REQUIRED', 'User ID required'); return; }
 
       const db = await getConnection();
       const result = await db.query('DELETE FROM users WHERE id = ?', [id]);
 
-      if (result.rowCount === 0) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
+      if (result.rowCount === 0) { sendError(res, 404, 'USER_NOT_FOUND', 'User not found'); return; }
 
-      res.json({
-        success: true,
-        message: 'User deleted successfully'
-      });
+      sendSuccess(res, { message: 'User deleted successfully' });
 
     } catch (error) {
       console.error('Delete user error:', error);
@@ -130,21 +122,15 @@ export class UsersController {
     try {
       const { id } = req.params;
       const { companyId, makeCompanyAdmin = false } = req.body || {};
-      if (!id || !companyId) { res.status(400).json({ error: 'user id and companyId are required' }); return; }
-      if (!req.user) { res.status(401).json({ error: 'Unauthorized' }); return; }
-      // Non-admins can only assign within their own company and must be company administrators
-      if (req.user.role !== 'admin') {
-        if (!req.user.companyId || req.user.companyId !== companyId || !req.user.companyAdmin) {
-          res.status(403).json({ error: 'Forbidden' }); return;
-        }
-      }
+      if (!id || !companyId) { sendError(res, 400, 'COMPANY_ASSIGNMENT_INVALID', 'user id and companyId are required'); return; }
+      if (!req.user) { sendError(res, 401, 'AUTH_REQUIRED', 'Unauthorized'); return; }
 
       const db = await getConnection();
       const subscriptionTier = req.user.subscriptionTier || 'trial';
       const subscriptionExpiry = req.user.subscriptionTier === 'trial' ? null : req.user.subscriptionExpiry || null;
 
       const updateResult = await db.query("UPDATE users SET company_id = ?, subscription_tier = ?, subscription_expiry = ?, updated_at = GETDATE() WHERE id = ?", [companyId, subscriptionTier, subscriptionExpiry, id]);
-      if (updateResult.rowCount === 0) { res.status(404).json({ error: 'User not found' }); return; }
+      if (updateResult.rowCount === 0) { sendError(res, 404, 'USER_NOT_FOUND', 'User not found'); return; }
 
       const adminCheck = await db.query("SELECT COUNT(*) AS count FROM users WHERE company_id = ? AND (role = 'admin' OR company_admin = 1)", [companyId]);
       const existingAdmins = Number(adminCheck.rows?.[0]?.count || 0);
@@ -153,7 +139,7 @@ export class UsersController {
         await db.query('UPDATE users SET company_admin = 1, updated_at = GETDATE() WHERE id = ?', [id]);
       }
 
-      res.json({ success: true, companyAdmin: shouldPromote });
+      sendSuccess(res, { companyAdmin: shouldPromote });
     } catch (error) {
       console.error('assignCompany error:', error);
       res.status(500).json({ error: 'Failed to assign company' });
@@ -166,21 +152,20 @@ export class UsersController {
     try {
       const { id } = req.params;
       const { isCompanyAdmin } = req.body || {};
-      if (typeof isCompanyAdmin !== 'boolean') { res.status(400).json({ error: 'isCompanyAdmin boolean required' }); return; }
-      if (!req.user) { res.status(401).json({ error: 'Unauthorized' }); return; }
-      // If not platform admin, ensure same company
+      if (typeof isCompanyAdmin !== 'boolean') { sendError(res, 400, 'COMPANY_ADMIN_FLAG_INVALID', 'isCompanyAdmin boolean required'); return; }
+      if (!req.user) { sendError(res, 401, 'AUTH_REQUIRED', 'Unauthorized'); return; }
       const db = await getConnection();
       const userQ = await db.query('SELECT company_id FROM users WHERE id = ?', [id]);
-      if (userQ.rows.length === 0) { res.status(404).json({ error: 'User not found' }); return; }
+      if (userQ.rows.length === 0) { sendError(res, 404, 'USER_NOT_FOUND', 'User not found'); return; }
       const targetCompanyId = userQ.rows[0].company_id;
       if (req.user.role !== 'admin' && req.user.companyId !== targetCompanyId) {
-        res.status(403).json({ error: 'Forbidden' }); return; }
+        sendError(res, 403, 'COMPANY_SCOPE_VIOLATION', 'Forbidden'); return; }
       const result = await db.query('UPDATE users SET company_admin = ?, updated_at = GETDATE() WHERE id = ?', [isCompanyAdmin ? 1 : 0, id]);
-      if (result.rowCount === 0) { res.status(404).json({ error: 'User not found' }); return; }
-      res.json({ success: true });
+      if (result.rowCount === 0) { sendError(res, 404, 'USER_NOT_FOUND', 'User not found'); return; }
+      sendSuccess(res);
     } catch (error) {
       console.error('setCompanyAdmin error:', error);
-      res.status(500).json({ error: 'Failed to set company admin' });
+      sendError(res, 500, 'COMPANY_ADMIN_UPDATE_FAILED', 'Failed to set company admin');
     }
   }
 }

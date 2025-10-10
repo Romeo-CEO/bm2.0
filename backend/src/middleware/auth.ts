@@ -1,6 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { getConnection } from '../config/database';
+import { logAuditEvent } from '../services/auditService';
+
+const resolveClientIp = (req: Request): string | null => {
+  const forwarded = req.headers['x-forwarded-for'] || req.headers['x-real-ip'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0]?.trim() || null;
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return forwarded[0];
+  }
+  if (req.ip) return req.ip;
+  if (req.connection && 'remoteAddress' in req.connection) {
+    return (req.connection as any).remoteAddress || null;
+  }
+  return null;
+};
 
 // Extend Request interface to include user
 declare global {
@@ -17,6 +33,7 @@ declare global {
         companyAdmin?: boolean;
         subscriptionExpiry?: string | null;
       };
+      authToken?: string;
     }
   }
 }
@@ -24,14 +41,15 @@ declare global {
 export const authenticateToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ success: false, error: 'Unauthorized', code: 'AUTH_REQUIRED' });
       return;
     }
 
     const token = authHeader.substring(7);
-    
+    req.authToken = token;
+
     // Verify JWT token
     const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-here';
     const decoded = jwt.verify(token, JWT_SECRET) as any;
@@ -44,7 +62,8 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
     );
 
     if (tokenResult.rows.length === 0) {
-      res.status(401).json({ error: 'Token expired or invalid' });
+      db.release?.();
+      res.status(401).json({ success: false, error: 'Token expired or invalid', code: 'TOKEN_INVALID' });
       return;
     }
 
@@ -55,7 +74,8 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
     );
 
     if (userResult.rows.length === 0) {
-      res.status(401).json({ error: 'User not found or inactive' });
+      db.release?.();
+      res.status(401).json({ success: false, error: 'User not found or inactive', code: 'USER_NOT_FOUND' });
       return;
     }
 
@@ -71,18 +91,59 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
       companyAdmin: Boolean(user.company_admin),
       subscriptionExpiry: user.subscription_expiry
     };
+    db.release?.();
 
     next();
   } catch (error) {
     console.error('Authentication error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ success: false, error: 'Internal server error', code: 'AUTH_INTERNAL_ERROR' });
   }
 };
 
-export const requireAdmin = (req: Request, res: Response, next: NextFunction): void => {
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   if (!req.user || req.user.role !== 'admin') {
-    res.status(403).json({ error: 'Admin access required' });
+    await logAuditEvent({
+      eventType: 'AUTHZ_DENIED',
+      success: false,
+      userId: req.user?.id,
+      email: req.user?.email,
+      ipAddress: resolveClientIp(req),
+      userAgent: req.headers['user-agent']?.toString() ?? null,
+      metadata: {
+        requiredRole: 'admin',
+        path: req.originalUrl,
+        method: req.method,
+      },
+    });
+    res.status(403).json({ success: false, error: 'Admin access required', code: 'ADMIN_REQUIRED' });
     return;
   }
   next();
+};
+
+export const requireCompanyAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: 'Unauthorized', code: 'AUTH_REQUIRED' });
+    return;
+  }
+
+  if (req.user.role === 'admin' || req.user.companyAdmin) {
+    next();
+    return;
+  }
+
+  await logAuditEvent({
+    eventType: 'AUTHZ_DENIED',
+    success: false,
+    userId: req.user.id,
+    email: req.user.email,
+    ipAddress: resolveClientIp(req),
+    userAgent: req.headers['user-agent']?.toString() ?? null,
+    metadata: {
+      requiredRole: 'company_admin',
+      path: req.originalUrl,
+      method: req.method,
+    },
+  });
+  res.status(403).json({ success: false, error: 'Company admin access required', code: 'COMPANY_ADMIN_REQUIRED' });
 };

@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/adminController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
+import { enforceCompanyScoping } from '../middleware/companyScope';
 
 const router = Router();
 const adminController = new AdminController();
 
 // All admin routes require authentication and admin role
-router.use(authenticateToken);
+router.use(authenticateToken, enforceCompanyScoping);
 router.use(requireAdmin);
 
 // User Management
