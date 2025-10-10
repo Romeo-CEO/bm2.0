@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { getConnection } from '../config/database';
+import { logAuditEvent } from '../services/auditService';
+import { personalizeTemplate, resolveTemplateFormat } from '../services/templatePersonalizationService';
 
 export class TemplatesController {
   /**
@@ -173,11 +175,11 @@ export class TemplatesController {
      let db: any = null;
      try {
        const { id } = req.params;
-       db = await getConnection();
-       const result = await db.query(
-         'SELECT download_url, file_name, file_type, subscription_tiers FROM templates WHERE id = ? AND is_active = 1',
-         [id]
-       );
+      db = await getConnection();
+      const result = await db.query(
+        'SELECT * FROM templates WHERE id = ? AND is_active = 1',
+        [id]
+      );
        if (result.rows.length === 0) {
          return res.status(404).json({ error: 'Template not found' });
        }
@@ -200,12 +202,80 @@ export class TemplatesController {
          }
        }
 
-       if (tpl.download_url) {
-         // Standard pattern: return 302 redirect for binary download
-         res.setHeader('Location', tpl.download_url);
-         return res.status(302).end();
-       }
-       return res.status(404).json({ error: 'Template has no download URL' });
+      const format = resolveTemplateFormat(tpl.file_type || tpl.fileType, tpl.file_name || tpl.fileName);
+      const templateContent = tpl.template_content || tpl.sample_content || tpl.body || tpl.content || '';
+
+      if (format && templateContent) {
+        let companyBranding: any = null;
+        if (req.user?.companyId) {
+          const companyResult = await db.query(
+            `SELECT TOP 1 name, email, phone, address, logo_url, primary_color, secondary_color
+             FROM companies WHERE id = ?`,
+            [req.user.companyId]
+          );
+          if (companyResult.rows.length > 0) {
+            companyBranding = companyResult.rows[0];
+          }
+        }
+
+        const decodeLogo = (value?: string | null): Buffer | null => {
+          if (!value || typeof value !== 'string') return null;
+          if (!value.startsWith('data:image/')) return null;
+          const parts = value.split(',');
+          if (parts.length !== 2) return null;
+          try {
+            return Buffer.from(parts[1], 'base64');
+          } catch {
+            return null;
+          }
+        };
+
+        const brandingCompany = {
+          name: companyBranding?.name || companyBranding?.company_name || req.user?.companyName || 'Your Company',
+          email: companyBranding?.email || req.user?.email || null,
+          phone: companyBranding?.phone || null,
+          address: companyBranding?.address || null
+        };
+
+        const theme = {
+          primaryColor: companyBranding?.primary_color || companyBranding?.primaryColor || null,
+          secondaryColor: companyBranding?.secondary_color || companyBranding?.secondaryColor || null
+        };
+
+        const logoBuffer = decodeLogo(companyBranding?.logo_url || companyBranding?.logoUrl || null);
+
+        const personalized = await personalizeTemplate({
+          format,
+          templateContent,
+          company: brandingCompany,
+          theme,
+          logoBuffer,
+          fileName: tpl.file_name || tpl.fileName || undefined
+        });
+
+        res.setHeader('Content-Type', personalized.contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${personalized.fileName}"`);
+        res.send(personalized.buffer);
+
+        await logAuditEvent({
+          eventType: 'TEMPLATE_DOWNLOADED',
+          success: true,
+          userId: req.user?.id,
+          metadata: {
+            templateId: id,
+            companyId: req.user?.companyId || null,
+            format
+          }
+        });
+        return;
+      }
+
+      if (tpl.download_url) {
+        res.setHeader('Location', tpl.download_url);
+        return res.status(302).end();
+      }
+
+      return res.status(415).json({ error: 'Template format not supported for personalization' });
      } catch (error) {
        console.error('Error downloading template:', error);
        return res.status(500).json({ error: 'Failed to download template' });

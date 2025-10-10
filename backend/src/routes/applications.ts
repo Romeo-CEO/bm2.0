@@ -27,6 +27,13 @@ router.post(
   requireAdmin,
   (req, res) => applicationsController.deployToMarketplace(req, res)
 );
+router.post(
+  '/:id/deploy',
+  authenticateToken,
+  enforceCompanyScoping,
+  requireAdmin,
+  (req, res) => applicationsController.deployApplication(req, res)
+);
 router.get(
   '/:id/deployment-checklist',
   authenticateToken,

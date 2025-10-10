@@ -10,10 +10,10 @@ import {
   verifyPasswordResetToken,
 } from '../services/passwordResetService';
 import { emailService, sendPasswordResetEmail } from '../services/emailService';
+import { hashPassword, passwordMeetsPolicy } from '../utils/passwordPolicy';
 
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_MINUTES = 30;
-const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
 
 const sanitizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -26,14 +26,6 @@ const getClientIp = (req: Request): string => {
     return forwarded[0];
   }
   return req.ip || req.connection.remoteAddress || '';
-};
-
-const passwordMeetsPolicy = (password: string): boolean => {
-  if (password.length < 8) return false;
-  if (!/[a-z]/.test(password)) return false;
-  if (!/[A-Z]/.test(password)) return false;
-  if (!/[0-9]/.test(password)) return false;
-  return true;
 };
 
 const buildUserResponse = (row: any) => ({
@@ -246,7 +238,7 @@ export class AuthController {
 
       const userId = uuidv4();
       const companyId = uuidv4();
-      const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      const passwordHash = await hashPassword(password);
       const domain = buildCompanyDomain(companyName);
 
       await db.query(
@@ -428,7 +420,7 @@ export class AuthController {
     const db = await getConnection();
 
     try {
-      const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+      const passwordHash = await hashPassword(newPassword);
 
       await db.query(
         `UPDATE users
