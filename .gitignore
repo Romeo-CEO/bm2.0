@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Environment files (do not commit secrets)
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build outputs
+build/
+dist/
+.out/
+.next/
+.nuxt/
+.temp/
+.tmp/
+.cache/
+.parcel-cache/
+.vite/
+
+# Coverage
+coverage/
+*.lcov
+
+# Tooling caches
+.eslintcache
+.stylelintcache
+.turbo/
+
+# IDE/editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Azure local artifacts
+.azure/

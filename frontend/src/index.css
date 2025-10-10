@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* New color palette */
+    --ghost-white: 225 50% 95%;      /* #edf0f9 */
+    --cool-gray: 235 12% 58%;        /* #8789a0 */
+    --process-cyan: 196 83% 56%;     /* #32baec */
+    --indigo-dye: 209 61% 23%;       /* #173c5f */
+    --oxford-blue: 240 50% 9%;       /* #0c0c24 */
+
+    /* Semantic tokens mapped to new palette */
+    --background: 225 50% 95%;                    /* ghost-white */
+    --foreground: 240 50% 9%;                     /* oxford-blue */
+
+    --card: 0 0% 100%;                            /* white for cards */
+    --card-foreground: 240 50% 9%;                /* oxford-blue */
+
+    --popover: 0 0% 100%;                         /* white */
+    --popover-foreground: 240 50% 9%;             /* oxford-blue */
+
+    --primary: 209 61% 23%;                       /* indigo-dye */
+    --primary-foreground: 225 50% 95%;            /* ghost-white */
+
+    --secondary: 196 83% 56%;                     /* process-cyan */
+    --secondary-foreground: 240 50% 9%;           /* oxford-blue */
+
+    --muted: 225 50% 95%;                         /* ghost-white */
+    --muted-foreground: 235 12% 58%;              /* cool-gray */
+
+    --accent: 196 83% 56%;                        /* process-cyan */
+    --accent-foreground: 240 50% 9%;              /* oxford-blue */
+
+    --destructive: 0 84.2% 60.2%;                 /* keep red for errors */
+    --destructive-foreground: 225 50% 95%;        /* ghost-white */
+
+    --border: 235 12% 58%;                        /* cool-gray - lighter borders */
+    --input: 235 12% 58%;                         /* cool-gray */
+    --ring: 196 83% 56%;                          /* process-cyan - focus rings */
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 209 61% 23%;            /* indigo-dye */
+    --sidebar-foreground: 225 50% 95%;            /* ghost-white */
+    --sidebar-primary: 196 83% 56%;               /* process-cyan */
+    --sidebar-primary-foreground: 240 50% 9%;     /* oxford-blue */
+    --sidebar-accent: 209 61% 28%;                /* indigo-dye slightly lighter */
+    --sidebar-accent-foreground: 225 50% 95%;     /* ghost-white */
+    --sidebar-border: 209 61% 18%;                /* indigo-dye darker */
+    --sidebar-ring: 196 83% 56%;                  /* process-cyan */
+  }
+
+  .dark {
+    /* Dark mode using new palette */
+    --background: 240 50% 9%;                     /* oxford-blue */
+    --foreground: 225 50% 95%;                    /* ghost-white */
+
+    --card: 209 61% 23%;                          /* indigo-dye */
+    --card-foreground: 225 50% 95%;               /* ghost-white */
+
+    --popover: 209 61% 23%;                       /* indigo-dye */
+    --popover-foreground: 225 50% 95%;            /* ghost-white */
+
+    --primary: 196 83% 56%;                       /* process-cyan */
+    --primary-foreground: 240 50% 9%;             /* oxford-blue */
+
+    --secondary: 209 61% 23%;                     /* indigo-dye */
+    --secondary-foreground: 225 50% 95%;          /* ghost-white */
+
+    --muted: 209 61% 18%;                         /* indigo-dye darker */
+    --muted-foreground: 235 12% 58%;              /* cool-gray */
+
+    --accent: 196 83% 56%;                        /* process-cyan */
+    --accent-foreground: 240 50% 9%;              /* oxford-blue */
+
+    --destructive: 0 62.8% 30.6%;                 /* keep red for errors */
+    --destructive-foreground: 225 50% 95%;        /* ghost-white */
+
+    --border: 209 61% 28%;                        /* indigo-dye lighter */
+    --input: 209 61% 28%;                         /* indigo-dye lighter */
+    --ring: 196 83% 56%;                          /* process-cyan */
+
+    --sidebar-background: 240 50% 9%;             /* oxford-blue */
+    --sidebar-foreground: 225 50% 95%;            /* ghost-white */
+    --sidebar-primary: 196 83% 56%;               /* process-cyan */
+    --sidebar-primary-foreground: 240 50% 9%;     /* oxford-blue */
+    --sidebar-accent: 209 61% 23%;                /* indigo-dye */
+    --sidebar-accent-foreground: 225 50% 95%;     /* ghost-white */
+    --sidebar-border: 209 61% 18%;                /* indigo-dye darker */
+    --sidebar-ring: 196 83% 56%;                  /* process-cyan */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom gradient utilities */
+@layer utilities {
+  .bg-gradient-palette-to-r {
+    background: linear-gradient(90deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-l {
+    background: linear-gradient(270deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-b {
+    background: linear-gradient(180deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-t {
+    background: linear-gradient(0deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-br {
+    background: linear-gradient(135deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-bl {
+    background: linear-gradient(225deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-tr {
+    background: linear-gradient(45deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-to-tl {
+    background: linear-gradient(315deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-palette-radial {
+    background: radial-gradient(hsl(var(--ghost-white)), hsl(var(--cool-gray)), hsl(var(--process-cyan)), hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  /* Individual color gradients for more control */
+  .bg-gradient-ocean {
+    background: linear-gradient(135deg, hsl(var(--process-cyan)), hsl(var(--indigo-dye)));
+  }
+  
+  .bg-gradient-sky {
+    background: linear-gradient(135deg, hsl(var(--ghost-white)), hsl(var(--process-cyan)));
+  }
+  
+  .bg-gradient-depth {
+    background: linear-gradient(135deg, hsl(var(--indigo-dye)), hsl(var(--oxford-blue)));
+  }
+  
+  .bg-gradient-mist {
+    background: linear-gradient(135deg, hsl(var(--ghost-white)), hsl(var(--cool-gray)));
+  }
+}
