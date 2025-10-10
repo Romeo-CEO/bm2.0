@@ -69,7 +69,7 @@ describe('templatePersonalizationService', () => {
     });
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(result.buffer as any);
+    await workbook.xlsx.load(Buffer.from(result.buffer as any) as any);
     const cell = workbook.getWorksheet('Template')?.getCell('B2');
     expect(cell?.value).toBe('Primary Contact: info@contoso.com');
   });

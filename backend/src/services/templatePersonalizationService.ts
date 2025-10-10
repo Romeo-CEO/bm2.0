@@ -222,7 +222,7 @@ const buildXlsx = async (content: string, primaryColor: string, secondaryColor: 
 
   if (logoBuffer) {
     const logoPng = await sharp(logoBuffer).resize({ width: 320, withoutEnlargement: true }).png().toBuffer();
-    const imageId = workbook.addImage({ buffer: logoPng as any, extension: 'png' });
+    const imageId = workbook.addImage({ buffer: logoPng as any, extension: 'png' } as any);
     worksheet.addImage(imageId, {
       tl: { col: 2, row: 1 },
       ext: { width: 320, height: 120 }

@@ -53,12 +53,14 @@ const createResponse = () => {
     res.headers[key] = value;
   }) as any;
 
-  res.send = vi.fn((payload: any) => {
-    res.body = payload;
-    return res as Response;
+  res.send = vi.fn(function (this: any, payload: any) {
+    this.body = payload;
+    return this;
   }) as any;
 
-  res.end = vi.fn(() => res as Response) as any;
+  res.end = vi.fn(function (this: any) {
+    return this;
+  }) as any;
 
   return res as Response & { body?: any; statusCode?: number; headers?: Record<string, string> };
 };

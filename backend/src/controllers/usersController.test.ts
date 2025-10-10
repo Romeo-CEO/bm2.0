@@ -35,8 +35,8 @@ vi.mock('../utils/companySeats', () => ({
 }));
 
 vi.mock('../utils/passwordPolicy', () => ({
-  hashPassword: hashPasswordMock,
-  passwordMeetsPolicy: passwordMeetsPolicyMock,
+  hashPassword: (...args: any[]) => (hashPasswordMock as any)(...args),
+  passwordMeetsPolicy: (...args: any[]) => (passwordMeetsPolicyMock as any)(...args),
 }));
 
 const createMockResponse = (): Response & { body?: any; statusCode?: number } => {
