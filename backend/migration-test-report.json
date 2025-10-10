@@ -1,0 +1,16 @@
+{
+  "timestamp": "2025-09-15T12:37:30.790Z",
+  "successRate": 20,
+  "results": {
+    "database": false,
+    "api": false,
+    "authentication": false,
+    "fileStorage": true,
+    "businessLogic": false
+  },
+  "summary": {
+    "total": 5,
+    "passed": 1,
+    "failed": 4
+  }
+}
