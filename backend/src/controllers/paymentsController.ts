@@ -463,7 +463,7 @@ export class PaymentsController {
               currency: plan.currency,
             },
           });
-        } else if (status === 'COMPLETE' && (userId || existingRecord?.user_id) && previouslyProcessed) {
+        } else if (status === 'COMPLETE' && (userId || existingRecord?.user_id) && alreadyProcessed) {
           await logAuditEvent({
             eventType: 'PAYMENT_STATUS_DUPLICATE_IGNORED',
             success: false,
@@ -472,7 +472,7 @@ export class PaymentsController {
               reference,
               status,
               planKey: plan.key,
-              processedAt: previousProcessedAt,
+              processedAt: existingRecord?.processed_at,
             },
           });
         } else if (status === 'COMPLETE' && alreadyProcessed) {
@@ -484,16 +484,6 @@ export class PaymentsController {
               reference,
               reason: 'already_processed',
               planKey: plan.key,
-            },
-          });
-        } else if (status === 'COMPLETE' && alreadyProcessed) {
-          await logAuditEvent({
-            eventType: 'PAYMENT_STATUS_UPDATE_SKIPPED',
-            success: true,
-            userId: userId || existingRecord?.user_id || undefined,
-            metadata: {
-              reference,
-              reason: 'already_processed',
             },
           });
         }

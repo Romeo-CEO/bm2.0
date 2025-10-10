@@ -57,3 +57,6 @@ Thumbs.db
 
 # Azure local artifacts
 .azure/
+
+# Local Claude config
+.claude/
