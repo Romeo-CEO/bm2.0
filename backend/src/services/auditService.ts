@@ -23,6 +23,7 @@ export type AuditEventType =
   | 'SSO_APPLICATION_UPDATED'
   | 'APPLICATION_DEPLOYED'
   | 'TEMPLATE_DOWNLOADED';
+  | 'PAYMENT_STATUS_DUPLICATE_IGNORED';
 
 export interface AuditLogOptions {
   eventType: AuditEventType;
