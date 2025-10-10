@@ -88,7 +88,19 @@ async function runMigrations() {
       const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
 
       // Execute migration
-      await connection.query(migrationSQL);
+      // For MSSQL, split on GO statements to execute as separate batches
+      if (DB_TYPE === DatabaseType.MSSQL && migrationSQL.includes('GO')) {
+        const batches = migrationSQL
+          .split(/^\s*GO\s*$/mi)
+          .map(batch => batch.trim())
+          .filter(batch => batch.length > 0);
+
+        for (const batch of batches) {
+          await connection.query(batch);
+        }
+      } else {
+        await connection.query(migrationSQL);
+      }
 
       // Record migration as executed
       await connection.query(

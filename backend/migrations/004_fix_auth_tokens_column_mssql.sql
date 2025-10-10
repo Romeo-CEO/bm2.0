@@ -14,6 +14,7 @@ IF @ConstraintName IS NOT NULL
 BEGIN
     EXEC('ALTER TABLE auth_tokens DROP CONSTRAINT ' + @ConstraintName)
 END
+GO
 
 -- Check if there are any NULL values in the token column
 IF EXISTS (SELECT 1 FROM auth_tokens WHERE token IS NULL)
@@ -21,15 +22,14 @@ BEGIN
     -- Update NULL values with a placeholder (this shouldn't happen in normal operation)
     UPDATE auth_tokens SET token = 'placeholder-' + LOWER(CONVERT(NVARCHAR(36), NEWID())) WHERE token IS NULL
 END
+GO
 
--- First make the column NOT NULL with current size
+-- Alter the column to the target size AND make it NOT NULL in one step
 ALTER TABLE auth_tokens
-ALTER COLUMN token NVARCHAR(128) NOT NULL;
-
--- Now alter the column to a larger but still indexable size
-ALTER TABLE auth_tokens
-ALTER COLUMN token NVARCHAR(500);
+ALTER COLUMN token NVARCHAR(500) NOT NULL;
+GO
 
 -- Recreate the primary key constraint
 ALTER TABLE auth_tokens
 ADD CONSTRAINT PK_auth_tokens PRIMARY KEY (token);
+GO

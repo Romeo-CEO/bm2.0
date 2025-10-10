@@ -24,10 +24,15 @@ WHERE subscription_tiers NOT LIKE '%free%';
 
 -- Step 3: Ensure at least 5-10 templates are available to FREE users
 -- Get the most commonly used templates
-UPDATE TOP (10) templates
+WITH TopTemplates AS (
+    SELECT TOP (10) id
+    FROM templates
+    WHERE category IN ('Accounting & Finance', 'General')
+    ORDER BY created_at DESC
+)
+UPDATE templates
 SET subscription_tiers = '["free", "trial", "diy", "diy_accountant"]'
-WHERE category IN ('Accounting & Finance', 'General')
-ORDER BY created_at DESC;
+WHERE id IN (SELECT id FROM TopTemplates);
 
 GO
 
