@@ -1,4 +1,4 @@
-import { getConnection } from '../config/database';
+import { getConnection, type DatabaseConnection } from '../config/database';
 
 export type AuditEventType =
   | 'AUTH_LOGIN'
@@ -25,17 +25,19 @@ export interface AuditLogOptions {
 
 export const logAuditEvent = async (options: AuditLogOptions): Promise<void> => {
   const { eventType, success, userId, email, ipAddress, userAgent, metadata } = options;
+  let db: DatabaseConnection | null = null;
 
   try {
-    const db = await getConnection();
+    db = await getConnection();
     const metaString = metadata ? JSON.stringify(metadata) : null;
     await db.query(
       `INSERT INTO audit_logs (user_id, email, event_type, success, ip_address, user_agent, metadata)
        VALUES (?, ?, ?, ?, ?, ?, ?)` ,
       [userId || null, email || null, eventType, success ? 1 : 0, ipAddress || null, userAgent || null, metaString]
     );
-    db.release?.();
   } catch (error) {
     console.error('Failed to write audit log', error);
+  } finally {
+    db?.release?.();
   }
 };
