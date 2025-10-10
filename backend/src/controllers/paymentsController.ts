@@ -193,7 +193,9 @@ export class PaymentsController {
         }
 
         const existing = await db.query('SELECT id, status, status_history, processed_at, user_id, company_id FROM payments WHERE payment_reference = ?', [reference]);
-        const statusHistory = appendStatusHistory(existing.rows?.[0]?.status_history, status, params);
+        const existingRecord = existing.rows?.[0];
+        const alreadyProcessed = Boolean(existingRecord?.processed_at);
+        const statusHistory = appendStatusHistory(existingRecord?.status_history, status, params);
 
         if (existing.rows?.length) {
           await db.query(
@@ -243,7 +245,7 @@ export class PaymentsController {
           );
         }
 
-        if (status === 'COMPLETE' && userId) {
+        if (status === 'COMPLETE' && userId && !alreadyProcessed) {
           const expiry = new Date(Date.now() + periodDays * 86400000);
           await db.query(
             `UPDATE users
@@ -263,6 +265,16 @@ export class PaymentsController {
               status,
               tier,
               periodDays,
+            },
+          });
+        } else if (status === 'COMPLETE' && alreadyProcessed) {
+          await logAuditEvent({
+            eventType: 'PAYMENT_STATUS_UPDATE_SKIPPED',
+            success: true,
+            userId: userId || existingRecord?.user_id || undefined,
+            metadata: {
+              reference,
+              reason: 'already_processed',
             },
           });
         }
