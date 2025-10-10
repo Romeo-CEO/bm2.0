@@ -2,6 +2,7 @@ export interface ApiResult<T> {
   success: boolean;
   data?: T;
   error?: string;
+  status?: number;
 }
 
 // PayFast types
@@ -115,6 +116,89 @@ export interface FrontendApplication {
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface SsoSession {
+  sessionId: string;
+  expiresAt?: string;
+}
+
+export interface SsoDomainTokenPayload {
+  token: string;
+  user: {
+    id: string;
+    role: string;
+    permissions: string[];
+    companyId?: string;
+  };
+}
+
+export async function apiSsoAuthenticate(): Promise<ApiResult<SsoSession>> {
+  const masterToken = localStorage.getItem('token');
+  if (!masterToken) {
+    return { success: false, error: 'Not authenticated', status: 401 };
+  }
+
+  const res = await fetch(`${API_BASE}sso/authenticate`, {
+    method: 'POST',
+    headers: authHeaders({ json: true }),
+    body: JSON.stringify({ token: masterToken })
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok || !data?.success || !data?.sessionId) {
+    return {
+      success: false,
+      error: (data && (data.error as string)) || res.statusText,
+      status: res.status
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      sessionId: data.sessionId as string,
+      expiresAt: data.expiresAt as string | undefined
+    },
+    status: res.status
+  };
+}
+
+export async function apiSsoGetDomainToken(
+  domain: string,
+  sessionId: string
+): Promise<ApiResult<SsoDomainTokenPayload>> {
+  const sanitizedDomain = domain.trim().toLowerCase();
+  const res = await fetch(`${API_BASE}sso/validate/${encodeURIComponent(sanitizedDomain)}`, {
+    method: 'POST',
+    headers: authHeaders({ json: true }),
+    body: JSON.stringify({ sessionId })
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok || !data?.success || !data?.token) {
+    return {
+      success: false,
+      error: (data && (data.error as string)) || res.statusText,
+      status: res.status
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      token: data.token as string,
+      user: {
+        id: data.user?.id as string,
+        role: data.user?.role as string,
+        permissions: Array.isArray(data.user?.permissions) ? data.user.permissions as string[] : [],
+        companyId: data.user?.companyId as string | undefined
+      }
+    },
+    status: res.status
+  };
 }
 
 export interface FrontendCompany {

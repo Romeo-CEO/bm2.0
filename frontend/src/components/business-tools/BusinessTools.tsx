@@ -3,15 +3,63 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
-import { ExternalLink, Lock } from 'lucide-react';
+import { ExternalLink, Lock, Loader2 } from 'lucide-react';
 import { useData } from '@/contexts/DataContext';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
+import { apiSsoAuthenticate, apiSsoGetDomainToken, type SsoSession } from '@/lib/api';
+import type { Application } from '@/types';
+
+const SSO_SESSION_STORAGE_KEY = 'bizmanager.sso.session';
+
+const readStoredSsoSession = (): SsoSession | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SSO_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { sessionId?: unknown; expiresAt?: unknown } | null;
+    if (!parsed || typeof parsed.sessionId !== 'string' || !parsed.sessionId) {
+      return null;
+    }
+    return {
+      sessionId: parsed.sessionId,
+      expiresAt: typeof parsed.expiresAt === 'string' ? parsed.expiresAt : undefined
+    };
+  } catch {
+    return null;
+  }
+};
+
+const storeSsoSession = (session: SsoSession) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      SSO_SESSION_STORAGE_KEY,
+      JSON.stringify({
+        sessionId: session.sessionId,
+        expiresAt: session.expiresAt ?? null,
+        storedAt: new Date().toISOString()
+      })
+    );
+  } catch {
+    // Ignore persistence errors (e.g. private browsing quota)
+  }
+};
+
+const clearStoredSsoSession = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(SSO_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage cleanup failures
+  }
+};
 
 export const BusinessTools: React.FC = () => {
   const { user } = useAuth();
   const { applications } = useData();
   const tools = useMemo(() => applications.filter(a => a.type === 'application'), [applications]);
+  const [launchingAppId, setLaunchingAppId] = React.useState<string | null>(null);
 
   const isBasic = (requiredTiers: string[]) => requiredTiers.includes('trial');
   const canAccessApp = (requiredTiers: string[]) => {
@@ -25,9 +73,76 @@ export const BusinessTools: React.FC = () => {
     window.location.href = '/subscribe';
   };
 
-  const openApplication = (url?: string) => {
-    if (!url) return;
-    window.open(url, '_blank');
+  const ensureSsoSession = async (forceRefresh = false): Promise<SsoSession> => {
+    const masterToken = typeof window !== 'undefined' ? window.localStorage.getItem('token') : null;
+    if (!masterToken) {
+      throw new Error('You need to sign in again before launching applications.');
+    }
+
+    if (!forceRefresh) {
+      const cached = readStoredSsoSession();
+      if (cached?.sessionId) {
+        return cached;
+      }
+    }
+
+    const result = await apiSsoAuthenticate();
+    if (!result.success || !result.data) {
+      if (result.status === 401) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+      throw new Error(result.error || 'Failed to start a secure session for this application.');
+    }
+
+    storeSsoSession(result.data);
+    return result.data;
+  };
+
+  const obtainDomainToken = async (domain: string): Promise<string> => {
+    let session = await ensureSsoSession(false);
+    let result = await apiSsoGetDomainToken(domain, session.sessionId);
+
+    if (result.success && result.data) {
+      return result.data.token;
+    }
+
+    const shouldRetry =
+      result.status === 401 ||
+      result.error === 'SSO session expired' ||
+      result.error === 'SSO session not found';
+
+    if (shouldRetry) {
+      clearStoredSsoSession();
+      session = await ensureSsoSession(true);
+      result = await apiSsoGetDomainToken(domain, session.sessionId);
+      if (result.success && result.data) {
+        return result.data.token;
+      }
+    }
+
+    throw new Error(result.error || 'Failed to obtain access for this application.');
+  };
+
+  const openApplication = async (app: Application) => {
+    if (!app.url) {
+      toast.error('This application is not yet configured with a launch URL.');
+      return;
+    }
+
+    setLaunchingAppId(app.id);
+
+    try {
+      const url = app.url.startsWith('http') ? new URL(app.url) : new URL(app.url, window.location.origin);
+      const token = await obtainDomainToken(url.host);
+      url.searchParams.set('token', token);
+      window.open(url.toString(), '_blank', 'noopener');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to open the application right now.';
+      toast.error(message.includes('application') || message.includes('session') ? message : `We couldn't open ${app.name}. ${message}`);
+      clearStoredSsoSession();
+    } finally {
+      setLaunchingAppId(null);
+    }
   };
 
   // Clear highlight after first render to avoid persistent ring
@@ -137,11 +252,16 @@ export const BusinessTools: React.FC = () => {
                     ? "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transform hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                     : "bg-gray-100 hover:bg-gray-200 text-gray-600"
                 )}
-                onClick={() => openApplication(app.url)}
-                disabled={!canAccessApp(app.subscriptionTiers)}
+                onClick={() => openApplication(app)}
+                disabled={!canAccessApp(app.subscriptionTiers) || launchingAppId === app.id}
                 variant={canAccessApp(app.subscriptionTiers) ? "default" : "secondary"}
               >
-                {canAccessApp(app.subscriptionTiers) ? (
+                {launchingAppId === app.id ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Opening…
+                  </>
+                ) : canAccessApp(app.subscriptionTiers) ? (
                   <>
                     <ExternalLink className="mr-2 h-4 w-4" />
                     Open Application
