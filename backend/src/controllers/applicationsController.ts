@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { getConnection } from '../config/database';
 import { randomUUID } from 'crypto';
+import { logAuditEvent } from '../services/auditService';
 
 export class ApplicationsController {
   /**
@@ -106,99 +107,221 @@ export class ApplicationsController {
       const { id } = req.params;
       const db = await getConnection();
 
-      // Get application status
-      const appResult = await db.query(
-        'SELECT * FROM applications WHERE id = ?',
-        [id]
-      );
+      try {
+        const appResult = await db.query('SELECT * FROM applications WHERE id = ?', [id]);
 
-      if (appResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Application not found' });
-      }
-
-      const app = appResult.rows[0];
-
-      // Check marketplace deployment status
-      const marketplaceResult = await db.query(
-        'SELECT COUNT(*) as count FROM marketplace_applications WHERE id = ?',
-        [id]
-      );
-
-      const deploymentStatus = {
-        sslCertificate: app.subdomain ? 'configured' : 'pending',
-        subdomainConfigured: app.subdomain ? 'configured' : 'pending',
-        marketplaceListed: marketplaceResult.rows[0].count > 0 ? 'configured' : 'pending',
-        launcherConfigured: app.app_url ? 'configured' : 'pending',
-        metadataComplete: app.description && app.icon_url ? 'configured' : 'pending'
-      };
-
-      const checklist = [
-        {
-          item: 'SSL Certificate Provisioning',
-          status: deploymentStatus.sslCertificate,
-          description: 'SSL certificate for subdomain must be provisioned',
-          automated: true,
-          manualSteps: app.subdomain ? [] : ['Configure SSL certificate in Azure Key Vault', 'Add DNS CNAME record for subdomain'],
-          docs: 'https://docs.microsoft.com/en-us/azure/key-vault/certificates/tutorial-import-certificate'
-        },
-        {
-          item: 'Subdomain Configuration',
-          status: deploymentStatus.subdomainConfigured,
-          description: 'Subdomain DNS records configured',
-          automated: true,
-          manualSteps: app.subdomain ? [] : ['Create CNAME record pointing to main domain', 'Configure Azure App Service custom domain'],
-          docs: 'https://docs.microsoft.com/en-us/azure/app-service/app-service-web-tutorial-custom-domain'
-        },
-        {
-          item: 'Marketplace Catalog Listing',
-          status: deploymentStatus.marketplaceListed,
-          description: 'Application listed in marketplace catalog',
-          automated: true,
-          manualSteps: ['Application must be approved for marketplace listing'],
-          docs: 'Internal marketplace catalog documentation'
-        },
-        {
-          item: 'Application Launcher',
-          status: deploymentStatus.launcherConfigured,
-          description: 'Application launcher URL configured',
-          automated: false,
-          manualSteps: app.app_url ? [] : ['Configure application URL in launcher system', 'Test launcher redirection'],
-          docs: 'Internal application launcher documentation'
-        },
-        {
-          item: 'Metadata Completeness',
-          status: deploymentStatus.metadataComplete,
-          description: 'Application metadata (description, icon, screenshots) complete',
-          automated: false,
-          manualSteps: ['Add application description', 'Upload application icon', 'Add screenshots'],
-          docs: 'Internal application metadata guidelines'
+        if (appResult.rows.length === 0) {
+          res.status(404).json({ error: 'Application not found' });
+          return;
         }
-      ];
 
-      const completeCount = checklist.filter(item => item.status === 'configured').length;
-      const isDeploymentReady = completeCount === checklist.length;
+        const app = appResult.rows[0];
+        const marketplaceResult = await db.query(
+          'SELECT COUNT(*) as count FROM marketplace_applications WHERE id = ?',
+          [id]
+        );
 
-      res.json({
-        success: true,
-        checklist,
-        deploymentStatus: {
-          totalItems: checklist.length,
-          completedItems: completeCount,
-          pendingItems: checklist.length - completeCount,
-          deploymentReady: isDeploymentReady
-        },
-        nextSteps: isDeploymentReady
-          ? ['Application ready for deployment']
-          : ['Complete all pending checklist items', 'Deploy application infrastructure', 'Test deployment configuration']
-      });
-      return;
+        const { checklist, statusMap, isReady } = this.buildDeploymentChecklist(
+          app,
+          Number(marketplaceResult.rows?.[0]?.count || 0)
+        );
 
+        const completed = checklist.filter(item => item.status === 'configured').length;
+
+        res.json({
+          success: true,
+          checklist,
+          deploymentStatus: {
+            totalItems: checklist.length,
+            completedItems: completed,
+            pendingItems: checklist.length - completed,
+            deploymentReady: isReady,
+            statusMap
+          },
+          nextSteps: isReady
+            ? ['Application ready for deployment']
+            : checklist.filter(item => item.status !== 'configured').map(item => item.remediation)
+        });
+      } finally {
+        db.release?.();
+      }
     } catch (error) {
       console.error('Error getting deployment checklist:', error);
       res.status(500).json({ error: 'Failed to get deployment checklist' });
-      return;
     }
   }
+
+  async deployApplication(req: Request, res: Response) {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        res.status(403).json({ error: 'Admin access required' });
+        return;
+      }
+
+      const { id } = req.params;
+      const db = await getConnection();
+
+      try {
+        const appResult = await db.query('SELECT * FROM applications WHERE id = ?', [id]);
+        if (appResult.rows.length === 0) {
+          res.status(404).json({ error: 'Application not found' });
+          return;
+        }
+
+        const app = appResult.rows[0];
+        const marketplaceResult = await db.query(
+          'SELECT COUNT(*) as count FROM marketplace_applications WHERE id = ?',
+          [id]
+        );
+        const marketplaceCount = Number(marketplaceResult.rows?.[0]?.count || 0);
+
+        const { checklist, statusMap, isReady } = this.buildDeploymentChecklist(app, marketplaceCount);
+
+        if (!isReady) {
+          res.status(400).json({
+            success: false,
+            error: 'Deployment checklist incomplete',
+            statusMap,
+            checklist
+          });
+          return;
+        }
+
+        if (marketplaceCount === 0) {
+          await db.query(
+            `INSERT INTO marketplace_applications (
+              id, name, slug, short_description, category, subcategory,
+              developer, subscription_tiers, starting_price, pricing_model,
+              trial_available, icon_url, screenshots, is_featured, is_new,
+              rating, total_reviews, order_priority, required_subscription_tier,
+              target_platforms, app_url, webhook_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          , [
+            app.id,
+            app.name,
+            app.subdomain || app.name.toLowerCase().replace(/\s+/g, '-'),
+            app.description || `${app.name} business application`,
+            app.category || 'General',
+            app.category || 'General',
+            app.developer || 'Business Manager',
+            app.subscription_tiers || JSON.stringify(['trial']),
+            0.00,
+            'subscription',
+            app.subscription_tiers?.includes?.('trial') || false,
+            app.icon_url || null,
+            app.screenshots ? JSON.stringify(app.screenshots) : null,
+            false,
+            true,
+            5.0,
+            0,
+            100,
+            app.subscription_tiers?.includes?.('trial') ? 'trial' : 'diy',
+            JSON.stringify(['web']),
+            app.app_url || `https://${app.subdomain || 'app'}.businessmanager.com`,
+            null
+          ]);
+        }
+
+        await db.query(
+          'UPDATE applications SET status = ?, deployed_at = GETDATE() WHERE id = ?',
+          ['deployed', id]
+        );
+
+        await logAuditEvent({
+          eventType: 'APPLICATION_DEPLOYED',
+          success: true,
+          userId: req.user?.id,
+          metadata: { applicationId: id, statusMap }
+        });
+
+        res.json({ success: true, status: 'deployed', statusMap, checklist });
+      } finally {
+        db.release?.();
+      }
+    } catch (error) {
+      console.error('Error deploying application', error);
+      res.status(500).json({ error: 'Failed to deploy application' });
+    }
+  }
+
+  private buildDeploymentChecklist(app: any, marketplaceCount: number) {
+    const sslProvisioned = Boolean(
+      (typeof app.ssl_status === 'string' && app.ssl_status.toLowerCase() === 'provisioned') ||
+      app.ssl_ready === 1 ||
+      app.sslProvisioned === 1 ||
+      app.ssl_certificate_id ||
+      app.sslCertificateId
+    );
+
+    const hasSubdomain = Boolean(app.subdomain);
+    const hasLauncher = Boolean(app.app_url);
+    const metadataComplete = Boolean(app.description && app.icon_url);
+    const statusFlags = {
+      sslCertificate: sslProvisioned && hasSubdomain,
+      dnsCname: hasSubdomain,
+      catalogListing: marketplaceCount > 0,
+      launcherConfigured: hasLauncher,
+      metadataComplete
+    } as const;
+
+    const toStatus = (flag: boolean) => (flag ? 'configured' : 'pending');
+
+    const checklist = [
+      {
+        key: 'sslCertificate',
+        item: 'SSL Certificate Provisioning',
+        status: toStatus(statusFlags.sslCertificate),
+        remediation: statusFlags.sslCertificate
+          ? 'SSL certificate in place'
+          : 'Provision SSL certificate and bind to custom domain'
+      },
+      {
+        key: 'dnsCname',
+        item: 'DNS CNAME Configuration',
+        status: toStatus(statusFlags.dnsCname),
+        remediation: statusFlags.dnsCname
+          ? 'DNS configured'
+          : 'Create DNS CNAME record for application subdomain'
+      },
+      {
+        key: 'catalogListing',
+        item: 'Marketplace Catalog Listing',
+        status: toStatus(statusFlags.catalogListing),
+        remediation: statusFlags.catalogListing
+          ? 'Listing available'
+          : 'Publish listing to the marketplace catalog'
+      },
+      {
+        key: 'launcherConfigured',
+        item: 'Application Launcher',
+        status: toStatus(statusFlags.launcherConfigured),
+        remediation: statusFlags.launcherConfigured
+          ? 'Launcher configured'
+          : 'Configure launcher target URL'
+      },
+      {
+        key: 'metadataComplete',
+        item: 'Metadata Completeness',
+        status: toStatus(statusFlags.metadataComplete),
+        remediation: statusFlags.metadataComplete
+          ? 'Metadata ready'
+          : 'Add description and icon before deployment'
+      }
+    ];
+
+    const statusMap = Object.fromEntries(
+      Object.entries(statusFlags).map(([key, flag]) => [key, toStatus(flag)])
+    );
+
+    const isReady = statusFlags.sslCertificate && statusFlags.dnsCname && statusFlags.launcherConfigured && statusFlags.metadataComplete;
+
+    return {
+      checklist,
+      statusMap,
+      isReady
+    };
+  }
+
   /**
    * Get applications with pagination and filtering
    */

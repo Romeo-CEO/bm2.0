@@ -8,6 +8,20 @@ const usersController = new UsersController();
 
 // User routes (admin only)
 router.get('/', authenticateToken, enforceCompanyScoping, requireAdmin, (req, res) => usersController.getUsers(req, res));
+router.post(
+  '/',
+  authenticateToken,
+  enforceCompanyScoping,
+  requireCompanyAdmin,
+  (req, res) => usersController.createUserWithTemporaryPassword(req, res)
+);
+router.get(
+  '/:id',
+  authenticateToken,
+  enforceCompanyScoping,
+  requireCompanyAdmin,
+  (req, res) => usersController.getUserById(req, res)
+);
 router.put('/:id', authenticateToken, enforceCompanyScoping, requireAdmin, (req, res) => usersController.updateUser(req, res));
 router.delete('/:id', authenticateToken, enforceCompanyScoping, requireAdmin, (req, res) => usersController.deleteUser(req, res));
 
