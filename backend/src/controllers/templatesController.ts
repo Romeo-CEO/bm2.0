@@ -231,7 +231,7 @@ export class TemplatesController {
         };
 
         const brandingCompany = {
-          name: companyBranding?.name || companyBranding?.company_name || req.user?.companyName || 'Your Company',
+          name: companyBranding?.name || companyBranding?.company_name || 'Your Company',
           email: companyBranding?.email || req.user?.email || null,
           phone: companyBranding?.phone || null,
           address: companyBranding?.address || null
