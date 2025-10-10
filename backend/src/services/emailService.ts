@@ -143,3 +143,26 @@ export const emailService = {
   sendCompanyInvitationEmail,
   sendTemporaryPasswordEmail,
 };
+
+export const sendNotificationEmail = async (
+  to: string,
+  subject: string,
+  htmlBody: string
+): Promise<void> => {
+  if (!isEmailEnabled()) {
+    console.log('[EmailService] Notification email suppressed (SendGrid key missing).', { to, subject });
+    return;
+  }
+
+  try {
+    await sgMail.send({
+      to,
+      from: DEFAULT_FROM_EMAIL,
+      subject,
+      html: htmlBody,
+    });
+  } catch (error) {
+    console.error('Failed to send notification email', error);
+    throw error;
+  }
+};

@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { getConnection } from '../config/database';
 import { randomUUID } from 'crypto';
 import { logAuditEvent } from '../services/auditService';
+import { recordUsageEvent } from '../services/usageMetricsService';
+import { trackEvent } from '../services/telemetryService';
 
 export class ApplicationsController {
   /**
@@ -772,6 +774,28 @@ export class ApplicationsController {
           subdomain: app.subdomain,
           message: 'Redirect to this URL to launch the application'
         }
+      });
+
+      recordUsageEvent({
+        eventType: 'app_launch',
+        userId: req.user?.id ?? null,
+        companyId: req.user?.companyId ?? null,
+        subjectId: id,
+        subjectType: 'application',
+        userRole: req.user?.role ?? null,
+        subscriptionTier: req.user?.subscriptionTier ?? null,
+        payload: { launchUrl: fullUrl }
+      }).catch(error => console.error('Failed to record application launch metric', error));
+
+      trackEvent({
+        name: 'application_launch',
+        properties: {
+          applicationId: String(id),
+          companyId: String(req.user?.companyId ?? ''),
+          userId: String(req.user?.id ?? ''),
+          tier: String(req.user?.subscriptionTier ?? ''),
+          role: String(req.user?.role ?? ''),
+        },
       });
       return;
 

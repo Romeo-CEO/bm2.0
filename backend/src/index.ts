@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { testConnection } from './config/database';
+import { ensureCoreSchema } from './services/schemaService';
 
 // Import routes
 import authRoutes from './routes/auth';
@@ -20,6 +21,7 @@ import analyticsRoutes from './routes/analytics';
 import companyRoutes from './routes/company';
 import paymentsRoutes from './routes/payments';
 import settingsRoutes from './routes/settings';
+import notificationsRoutes from './routes/notifications';
 
 // Load environment variables
 dotenv.config();
@@ -66,6 +68,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/company', companyRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 // 404 handler - using a proper catch-all pattern
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
@@ -85,6 +88,16 @@ const startServer = async () => {
     if (!dbConnected) {
       console.warn('⚠️  Database connection failed, but server will start anyway');
       console.warn('⚠️  API endpoints requiring database will return errors');
+    }
+
+    if (dbConnected) {
+      try {
+        await ensureCoreSchema();
+        console.log('🛠️  Core schema ensured');
+      } catch (schemaError) {
+        console.error('Failed to ensure core schema', schemaError);
+        throw schemaError;
+      }
     }
 
     app.listen(PORT, () => {

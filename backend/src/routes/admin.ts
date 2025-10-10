@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/adminController';
 import { ssoApplicationsController } from '../controllers/ssoApplicationsController';
+import { templateCatalogAdminController } from '../controllers/templateCatalogAdminController';
+import { auditLogsController } from '../controllers/auditLogsController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
 import { enforceCompanyScoping } from '../middleware/companyScope';
 
@@ -37,5 +39,18 @@ router.get('/sso-applications/:id', (req, res) => ssoApplicationsController.getB
 router.post('/sso-applications', (req, res) => ssoApplicationsController.create(req, res));
 router.put('/sso-applications/:id', (req, res) => ssoApplicationsController.update(req, res));
 router.delete('/sso-applications/:id', (req, res) => ssoApplicationsController.remove(req, res));
+
+// Template catalog administration
+router.get('/template-catalog/categories', (req, res) => templateCatalogAdminController.listCategories(req, res));
+router.post('/template-catalog/categories', (req, res) => templateCatalogAdminController.createCategory(req, res));
+router.put('/template-catalog/categories/:id', (req, res) => templateCatalogAdminController.updateCategory(req, res));
+router.delete('/template-catalog/categories/:id', (req, res) => templateCatalogAdminController.deleteCategory(req, res));
+router.post('/template-catalog/types', (req, res) => templateCatalogAdminController.createType(req, res));
+router.put('/template-catalog/types/:id', (req, res) => templateCatalogAdminController.updateType(req, res));
+router.delete('/template-catalog/types/:id', (req, res) => templateCatalogAdminController.deleteType(req, res));
+router.put('/template-catalog/templates/:templateId/assignment', (req, res) => templateCatalogAdminController.assignTemplate(req, res));
+
+// Audit logs
+router.get('/audit/logs', (req, res) => auditLogsController.list(req, res));
 
 export default router;

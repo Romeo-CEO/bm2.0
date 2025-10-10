@@ -13,7 +13,9 @@ const {
 }));
 
 vi.mock('../config/database', () => ({
-  getConnection: (...args: any[]) => getConnectionMock(...args)
+  getConnection: (...args: any[]) => getConnectionMock(...args),
+  DatabaseType: { MYSQL: 'mysql', POSTGRESQL: 'postgresql', MSSQL: 'mssql' },
+  DB_TYPE: 'mysql'
 }));
 
 vi.mock('../services/auditService', () => ({
@@ -29,27 +31,35 @@ vi.mock('../services/templatePersonalizationService', async () => {
 });
 
 const createResponse = () => {
-  const res: Partial<Response & { body?: any; statusCode?: number; headers?: Record<string, string> }> = {};
-  res.statusCode = 200;
-  res.headers = {};
-  res.status = vi.fn(function (this: any, code: number) {
-    this.statusCode = code;
-    return this;
+  const res: Partial<Response & { body?: any; statusCode?: number; headers?: Record<string, string> }> = {
+    statusCode: 200,
+    headers: {},
+  };
+
+  res.status = vi.fn((code: number) => {
+    res.statusCode = code;
+    return res as Response;
   }) as any;
-  res.json = vi.fn(function (this: any, payload: any) {
-    this.body = payload;
-    return this;
+
+  res.json = vi.fn((payload: any) => {
+    res.body = payload;
+    return res as Response;
   }) as any;
-  res.setHeader = vi.fn(function (this: any, key: string, value: string) {
-    this.headers![key] = value;
+
+  res.setHeader = vi.fn((key: string, value: string) => {
+    if (!res.headers) {
+      res.headers = {};
+    }
+    res.headers[key] = value;
   }) as any;
-  res.send = vi.fn(function (this: any, payload: any) {
-    this.body = payload;
-    return this;
+
+  res.send = vi.fn((payload: any) => {
+    res.body = payload;
+    return res as Response;
   }) as any;
-  res.end = vi.fn(function () {
-    return this;
-  }) as any;
+
+  res.end = vi.fn(() => res as Response) as any;
+
   return res as Response & { body?: any; statusCode?: number; headers?: Record<string, string> };
 };
 
