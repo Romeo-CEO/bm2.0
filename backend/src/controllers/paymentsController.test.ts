@@ -29,9 +29,11 @@ const createResponse = () => {
 describe('PaymentsController.payfastItn', () => {
   const queryMock = vi.fn();
   const releaseMock = vi.fn();
+  let existingPaymentRow: any = null;
 
   beforeEach(() => {
     vi.resetAllMocks();
+    existingPaymentRow = null;
     (database.getConnection as unknown as Mock).mockResolvedValue({ query: queryMock, release: releaseMock });
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM platform_settings')) {
@@ -41,7 +43,7 @@ describe('PaymentsController.payfastItn', () => {
         return { rows: [{ id: 'user-1', company_id: 'company-1' }] };
       }
       if (sql.startsWith('SELECT id, status')) {
-        return { rows: [] };
+        return existingPaymentRow ? { rows: [existingPaymentRow] } : { rows: [] };
       }
       return { rows: [], rowCount: 0 };
     });
@@ -57,11 +59,15 @@ describe('PaymentsController.payfastItn', () => {
   it('processes a valid notification and stores payment', async () => {
     const params = {
       payment_status: 'COMPLETE',
-      amount_gross: '100.00',
+      amount_gross: '149.00',
       pf_payment_id: 'pf-123',
       email_address: 'user@example.com',
       custom_int1: '30',
-      custom_str3: 'pro',
+      custom_str3: 'diy',
+      custom_str4: 'diy:monthly',
+      custom_str5: 'monthly',
+      item_name: 'DIY Monthly',
+      currency: 'ZAR',
     };
     const signature = payfastService.computeSignature(params, 'passphrase');
 
@@ -97,5 +103,72 @@ describe('PaymentsController.payfastItn', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body?.code).toBe('PAYFAST_VALIDATION_FAILED');
+  });
+
+  it('rejects notifications with mismatched plan details', async () => {
+    const params = {
+      payment_status: 'COMPLETE',
+      amount_gross: '10.00',
+      pf_payment_id: 'pf-456',
+      email_address: 'user@example.com',
+      custom_str3: 'diy',
+      custom_str4: 'diy:monthly',
+      custom_str5: 'monthly',
+      item_name: 'DIY Monthly',
+      currency: 'ZAR',
+    };
+    const signature = payfastService.computeSignature(params, 'passphrase');
+
+    const req = {
+      body: { ...params, signature },
+      headers: { 'x-forwarded-for': '196.33.227.206' },
+      originalUrl: '/api/payments/payfast/itn',
+      method: 'POST',
+    } as unknown as Request;
+    const res = createResponse();
+
+    await controller.payfastItn(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.code).toBe('PAYFAST_PLAN_MISMATCH');
+  });
+
+  it('does not extend subscriptions for duplicate completed notifications', async () => {
+    const params = {
+      payment_status: 'COMPLETE',
+      amount_gross: '149.00',
+      pf_payment_id: 'pf-789',
+      email_address: 'user@example.com',
+      custom_str3: 'diy',
+      custom_str4: 'diy:monthly',
+      custom_str5: 'monthly',
+      item_name: 'DIY Monthly',
+      currency: 'ZAR',
+    };
+    const signature = payfastService.computeSignature(params, 'passphrase');
+
+    existingPaymentRow = {
+      id: 'payment-1',
+      status: 'COMPLETE',
+      status_history: '[]',
+      processed_at: new Date().toISOString(),
+      user_id: 'user-1',
+      company_id: 'company-1',
+    };
+
+    const req = {
+      body: { ...params, signature },
+      headers: { 'x-forwarded-for': '196.33.227.206' },
+      originalUrl: '/api/payments/payfast/itn',
+      method: 'POST',
+    } as unknown as Request;
+    const res = createResponse();
+
+    await controller.payfastItn(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(
+      auditService.logAuditEvent
+    ).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'PAYMENT_STATUS_DUPLICATE_IGNORED' }));
   });
 });
