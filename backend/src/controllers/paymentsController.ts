@@ -385,8 +385,10 @@ export class PaymentsController {
         }
 
         const existing = await db.query('SELECT id, status, status_history, processed_at, user_id, company_id FROM payments WHERE payment_reference = ?', [reference]);
-        const previousProcessedAt = existing.rows?.[0]?.processed_at;
-        const statusHistory = appendStatusHistory(existing.rows?.[0]?.status_history, status, params);
+        const existingRecord = existing.rows?.[0];
+        const previousProcessedAt = existingRecord?.processed_at ?? null;
+        const alreadyProcessed = Boolean(previousProcessedAt);
+        const statusHistory = appendStatusHistory(existingRecord?.status_history, status, params);
 
         if (existing.rows?.length) {
           await db.query(
@@ -436,8 +438,8 @@ export class PaymentsController {
           );
         }
 
-        const previouslyProcessed = Boolean(previousProcessedAt);
-        const shouldApplySubscription = status === 'COMPLETE' && userId && !previouslyProcessed;
+        const previouslyProcessed = alreadyProcessed;
+        const shouldApplySubscription = status === 'COMPLETE' && userId && !alreadyProcessed;
 
         if (shouldApplySubscription) {
           const expiry = new Date(Date.now() + periodDays * 86400000);
@@ -465,16 +467,27 @@ export class PaymentsController {
               currency: plan.currency,
             },
           });
-        } else if (status === 'COMPLETE' && userId && previouslyProcessed) {
+        } else if (status === 'COMPLETE' && (userId || existingRecord?.user_id) && previouslyProcessed) {
           await logAuditEvent({
             eventType: 'PAYMENT_STATUS_DUPLICATE_IGNORED',
             success: false,
-            userId,
+            userId: userId || existingRecord?.user_id || undefined,
             metadata: {
               reference,
               status,
               planKey: plan.key,
               processedAt: previousProcessedAt,
+            },
+          });
+        } else if (status === 'COMPLETE' && alreadyProcessed) {
+          await logAuditEvent({
+            eventType: 'PAYMENT_STATUS_UPDATE_SKIPPED',
+            success: true,
+            userId: userId || existingRecord?.user_id || undefined,
+            metadata: {
+              reference,
+              reason: 'already_processed',
+              planKey: plan.key,
             },
           });
         }

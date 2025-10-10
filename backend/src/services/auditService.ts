@@ -12,6 +12,7 @@ export type AuditEventType =
   | 'PAYMENT_ITN_RECEIVED'
   | 'PAYMENT_ITN_REJECTED'
   | 'PAYMENT_STATUS_UPDATE'
+  | 'PAYMENT_STATUS_UPDATE_SKIPPED'
   | 'PAYMENT_STATUS_DUPLICATE_IGNORED';
 
 export interface AuditLogOptions {
