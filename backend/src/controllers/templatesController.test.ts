@@ -47,7 +47,7 @@ const createResponse = () => {
     this.body = payload;
     return this;
   }) as any;
-  res.end = vi.fn(function () {
+  res.end = vi.fn(function (this: any) {
     return this;
   }) as any;
   return res as Response & { body?: any; statusCode?: number; headers?: Record<string, string> };
